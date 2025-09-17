@@ -1,0 +1,98 @@
+name: 🏥 Sync Health Check & Monitoring
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"  # Every 6 hours
+  workflow_dispatch:
+
+env:
+  BASE44_REPO: "base44dev/nova-sniper-40448af6"
+  TARGET_REPO: "IrisGuard/nova-sniper"
+
+jobs:
+  health-check:
+    name: 🔍 Repository Sync Health Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout repositories
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          
+      - name: 🌐 Setup remotes
+        run: |
+          git remote add base44 https://github.com/${{ env.BASE44_REPO }}.git || true
+          git fetch base44 main
+          
+      - name: 🔍 Compare repositories
+        id: compare
+        run: |
+          # Get commit hashes
+          LOCAL_HASH=$(git rev-parse HEAD)
+          REMOTE_HASH=$(git rev-parse base44/main)
+          
+          # Get commit counts
+          LOCAL_COUNT=$(git rev-list --count HEAD)
+          REMOTE_COUNT=$(git rev-list --count base44/main)
+          
+          # Get last sync time
+          LAST_SYNC=$(git log --grep="sync from Base44" -1 --pretty=format:"%cr" || echo "Never")
+          
+          echo "📊 SYNC HEALTH REPORT"
+          echo "===================="
+          echo "🎯 IrisGuard commit: $LOCAL_HASH ($LOCAL_COUNT commits)"
+          echo "🔄 Base44 commit: $REMOTE_HASH ($REMOTE_COUNT commits)"
+          echo "🕐 Last sync: $LAST_SYNC"
+          
+          if [ "$LOCAL_HASH" = "$REMOTE_HASH" ]; then
+            echo "status=✅ IN_SYNC" >> $GITHUB_OUTPUT
+            echo "✅ Repositories are perfectly synchronized"
+          else
+            echo "status=⚠️ OUT_OF_SYNC" >> $GITHUB_OUTPUT
+            echo "⚠️ Repositories are out of sync!"
+            
+            # Show differences
+            echo ""
+            echo "📝 Commits in Base44 not in IrisGuard:"
+            git log HEAD..base44/main --oneline || echo "None"
+            
+            echo ""
+            echo "📝 Commits in IrisGuard not in Base44:"
+            git log base44/main..HEAD --oneline || echo "None"
+          fi
+          
+      - name: 🚨 Auto-fix if out of sync
+        if: contains(steps.compare.outputs.status, 'OUT_OF_SYNC')
+        run: |
+          echo "🔧 Auto-fixing sync issues..."
+          
+          # Trigger sync workflow
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ env.TARGET_REPO }}/dispatches \
+            -d '{"event_type":"sync-trigger"}'
+            
+          echo "✅ Sync workflow triggered"
+          
+      - name: 📈 Generate sync report
+        run: |
+          echo "📊 NOVA SNIPER SYNC REPORT" >> sync_report.md
+          echo "=========================" >> sync_report.md
+          echo "" >> sync_report.md
+          echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> sync_report.md
+          echo "**Status:** ${{ steps.compare.outputs.status }}" >> sync_report.md
+          echo "" >> sync_report.md
+          echo "**Repositories:**" >> sync_report.md
+          echo "- 🎯 Target: https://github.com/${{ env.TARGET_REPO }}" >> sync_report.md
+          echo "- 🔄 Source: https://github.com/${{ env.BASE44_REPO }}" >> sync_report.md
+          echo "" >> sync_report.md
+          echo "**Sync Flow:** Base44 → IrisGuard → Render" >> sync_report.md
+          
+      - name: ✅ Health check completed
+        run: |
+          echo "🏥 Health check completed"
+          echo "📋 Status: ${{ steps.compare.outputs.status }}"

@@ -1,0 +1,83 @@
+name: 🌐 Webhook-based Real-time Sync
+
+on:
+  repository_dispatch:
+    types: [base44-update]
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: 'Force synchronization'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  BASE44_REPO: "base44dev/nova-sniper-40448af6"
+  TARGET_REPO: "IrisGuard/nova-sniper"
+
+jobs:
+  instant-sync:
+    name: ⚡ Instant Sync (Webhook Triggered)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🎯 Webhook received
+        run: |
+          echo "⚡ Webhook-based sync triggered!"
+          echo "🕐 Timestamp: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "📡 Source: Base44 repository update detected"
+          
+      - name: 📥 Checkout IrisGuard repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          
+      - name: 🔧 Configure Git
+        run: |
+          git config --global user.name "Nova Sniper Webhook Bot"
+          git config --global user.email "webhook-bot@nova-sniper.com"
+          
+      - name: 🌐 Setup Base44 remote
+        run: |
+          git remote add base44 https://github.com/${{ env.BASE44_REPO }}.git || true
+          git remote set-url base44 https://github.com/${{ env.BASE44_REPO }}.git
+          git fetch base44 main
+          
+      - name: 🔄 Force sync from Base44
+        run: |
+          echo "🚀 Performing instant sync..."
+          
+          # Get commit info from Base44
+          LATEST_COMMIT=$(git log base44/main -1 --pretty=format:"%H")
+          COMMIT_MESSAGE=$(git log base44/main -1 --pretty=format:"%s")
+          COMMIT_AUTHOR=$(git log base44/main -1 --pretty=format:"%an")
+          
+          echo "📝 Latest Base44 commit: $LATEST_COMMIT"
+          echo "📝 Commit message: $COMMIT_MESSAGE"
+          echo "👤 Author: $COMMIT_AUTHOR"
+          
+          # Perform merge
+          SYNC_MSG="⚡ Real-time sync from Base44: $COMMIT_MESSAGE (by $COMMIT_AUTHOR)"
+          git merge base44/main --no-ff -m "$SYNC_MSG" || {
+            echo "⚠️ Handling merge conflicts..."
+            git merge base44/main --strategy-option=theirs --no-ff -m "$SYNC_MSG"
+          }
+          
+      - name: ⬆️ Push synchronized changes
+        run: |
+          echo "📤 Pushing to IrisGuard repository..."
+          git push origin main
+          
+      - name: 🎉 Sync completed
+        run: |
+          echo "✅ Real-time sync completed successfully!"
+          echo "🔄 Base44 → IrisGuard sync finished"
+          echo "⏱️ Total time: $((SECONDS)) seconds"
+          
+      - name: 📊 Trigger Render deployment
+        run: |
+          echo "🚀 Triggering Render deployment..."
+          # Render will automatically detect the GitHub push and deploy
+          echo "✅ Render deployment will be triggered automatically"

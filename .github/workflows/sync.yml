@@ -1,26 +1,93 @@
-name: Sync from Base44 Repo
+name: 🔄 Real-time Sync from Base44 Repository
 
 on:
-  workflow_dispatch:   # manual trigger
+  workflow_dispatch:   # Manual trigger
   schedule:
-    - cron: "*/10 * * * *"   # run every 10 minutes
+    - cron: "*/5 * * * *"   # Every 5 minutes for real-time sync
+  repository_dispatch:
+    types: [sync-trigger]   # Webhook trigger
+  push:   # Also sync when there are direct pushes
+    branches: [main]
+
+env:
+  BASE44_REPO: "base44dev/nova-sniper-40448af6"
+  TARGET_REPO: "IrisGuard/nova-sniper"
 
 jobs:
   sync:
+    name: 🚀 Sync Base44 → IrisGuard
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout destination repo
-        uses: actions/checkout@v3
+      - name: 📥 Checkout IrisGuard repository
+        uses: actions/checkout@v4
         with:
-          repository: IrisGuard/nova-sniper
-          token: ${{ secrets.PAT_TOKEN }}
-          persist-credentials: false
-
-      - name: Mirror from base44dev
+          repository: ${{ env.TARGET_REPO }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          
+      - name: 🔧 Configure Git
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git remote add upstream https://github.com/base44dev/nova-sniper-40448af6.git
-          git fetch upstream
-          git merge upstream/main --allow-unrelated-histories -m "Sync from Base44"
+          git config --global user.name "Nova Sniper Sync Bot"
+          git config --global user.email "sync-bot@nova-sniper.com"
+          git config --global init.defaultBranch main
+          
+      - name: 🌐 Add Base44 remote
+        run: |
+          git remote add base44 https://github.com/${{ env.BASE44_REPO }}.git || true
+          git remote set-url base44 https://github.com/${{ env.BASE44_REPO }}.git
+          
+      - name: 📡 Fetch latest from Base44
+        run: |
+          echo "🔍 Fetching from Base44 repository..."
+          git fetch base44 main
+          
+      - name: 🔄 Check for changes
+        id: check_changes
+        run: |
+          # Get latest commit hashes
+          LOCAL_HASH=$(git rev-parse HEAD)
+          REMOTE_HASH=$(git rev-parse base44/main)
+          
+          echo "Local commit: $LOCAL_HASH"
+          echo "Remote commit: $REMOTE_HASH"
+          
+          if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "✅ Changes detected - sync needed"
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No changes detected - sync not needed"
+          fi
+          
+      - name: 🔀 Sync changes from Base44
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          echo "🚀 Syncing changes from Base44..."
+          
+          # Create a merge commit with detailed message
+          COMMIT_MSG="🔄 Auto-sync from Base44 ($(date '+%Y-%m-%d %H:%M:%S UTC'))"
+          
+          # Merge with strategy to prefer Base44 changes
+          git merge base44/main --no-ff -m "$COMMIT_MSG" || {
+            echo "⚠️ Merge conflict detected, resolving..."
+            # In case of conflicts, prefer Base44 version
+            git merge base44/main --strategy-option=theirs --no-ff -m "$COMMIT_MSG"
+          }
+          
+      - name: ⬆️ Push to IrisGuard repository
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          echo "📤 Pushing synchronized changes..."
           git push origin main
+          
+      - name: ✅ Sync completed
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          echo "🎉 Sync completed successfully!"
+          echo "📊 Repository synchronized: Base44 → IrisGuard"
+          
+      - name: 📝 No changes to sync
+        if: steps.check_changes.outputs.changes == 'false'
+        run: |
+          echo "ℹ️ Repositories are already in sync - no action needed"
